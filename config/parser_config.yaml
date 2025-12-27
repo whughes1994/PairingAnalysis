@@ -1,0 +1,63 @@
+# Pairing Parser Configuration
+
+# Processing settings
+processing:
+  page_chunk_size: 10          # Number of pages to process at once
+  max_memory_mb: 500           # Maximum memory usage in MB
+  enable_multiprocessing: false # Enable parallel processing (future)
+  skip_on_error: true          # Continue processing if a pairing fails
+
+# Output settings
+output:
+  format: "json"               # Output format: json
+  indent: 2                    # JSON indentation
+  write_mode: "streaming"      # streaming or buffered
+  create_backup: true          # Backup existing output files
+
+# Validation settings
+validation:
+  enabled: true
+  strict_mode: false           # Fail on validation errors
+  check_time_continuity: true  # Validate time sequences
+  check_required_fields: true
+
+# Logging settings
+logging:
+  level: "INFO"                # DEBUG, INFO, WARNING, ERROR
+  console_output: true
+  file_output: true
+  log_dir: "logs"
+  max_log_size_mb: 10
+  backup_count: 5
+
+# Parser-specific settings
+parser:
+  # Fixed column positions for leg data
+  leg_columns:
+    equipment: [4, 7]
+    flight_number: [11, 15]
+    departure_station: [16, 19]
+    arrival_station: [20, 23]
+    departure_time: [24, 28]
+    arrival_time: [29, 33]
+    ground_time: [35, 40]
+    meal_code: [41, 42]
+    flight_time: [48, 53]
+    accumulated_flight_time: [53, 59]
+    duty_time: [61, 66]
+    d_c: [71, 75]
+
+  # Regex patterns (compiled at runtime)
+  patterns:
+    header_line: "1DSL"
+    pairing_start: "EFF"
+    report_time: "RPT:\\s*(\\d+)"
+    release_time: "RLS:\\s*(\\d+)"
+    hotel_info: "HTL:"
+    ground_transport: "(VIP|AIRLINE|CONNECT|TAXI)"
+
+  # Data cleaning
+  cleaning:
+    strip_whitespace: true
+    convert_time_decimals: true  # Convert .00 to 0, 9.24 to 9:24
+    normalize_airports: true

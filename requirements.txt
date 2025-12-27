@@ -1,0 +1,32 @@
+# PDF Processing
+pdfplumber>=0.11.0
+pypdfium2>=5.0.0
+
+# Data handling
+pydantic>=2.0.0
+
+# CLI
+click>=8.0.0
+tqdm>=4.65.0
+
+# Configuration
+pyyaml>=6.0
+
+# Logging
+colorlog>=6.7.0
+
+# Testing (optional)
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# MongoDB (optional - for analytics)
+pymongo>=4.6.0
+
+# Dashboard (optional - for web interface)
+streamlit>=1.28.0
+plotly>=5.18.0
+pandas>=2.0.0
+
+# Geolocation (optional - for map visualizations)
+airportsdata>=20231215
+geopy>=2.4.0
