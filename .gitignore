@@ -41,3 +41,7 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# QA annotations
+qa_annotations/*.json
+!qa_annotations/.gitkeep

@@ -11,9 +11,9 @@ import yaml
 import click
 from tqdm import tqdm
 
-from utils import get_logger, StreamingPDFReader, PDFInfo, JSONFileWriter
-from parsers import PairingParser, PairingValidator
-from models import MasterData
+from .utils import get_logger, StreamingPDFReader, PDFInfo, StreamingTextReader, TextFileInfo, JSONFileWriter
+from .parsers import PairingParser, PairingValidator
+from .models import MasterData
 
 
 def load_config(config_path: Optional[str] = None) -> dict:
@@ -66,10 +66,10 @@ def process_single_file(
     logger
 ) -> bool:
     """
-    Process a single PDF file.
+    Process a single PDF or DAT file.
 
     Args:
-        input_path: Path to input PDF
+        input_path: Path to input PDF or DAT file
         output_path: Path to output JSON
         config: Configuration dictionary
         logger: Logger instance
@@ -80,32 +80,69 @@ def process_single_file(
     start_time = time.time()
 
     try:
-        # Get PDF info
-        pdf_info = PDFInfo.get_info(input_path)
-        logger.info(f"Processing: {pdf_info['filename']}")
-        logger.info(f"  Size: {pdf_info['size_mb']:.2f} MB")
-        logger.info(f"  Pages: {pdf_info.get('page_count', 'unknown')}")
+        # Detect file type and get info
+        input_file = Path(input_path)
+        file_ext = input_file.suffix.lower()
 
-        # Initialize parser
-        parser = PairingParser(config)
+        if file_ext == '.dat':
+            # Process .DAT text file
+            file_info = TextFileInfo.get_info(input_path)
+            logger.info(f"Processing DAT file: {file_info['filename']}")
+            logger.info(f"  Size: {file_info['size_mb']:.2f} MB")
+            logger.info(f"  Lines: {file_info.get('line_count', 'unknown')}")
 
-        # Read and parse PDF in chunks
-        pdf_reader = StreamingPDFReader(
-            input_path,
-            chunk_size=config['processing']['page_chunk_size']
-        )
+            # Initialize parser
+            parser = PairingParser(config)
 
-        total_pages = pdf_reader.get_page_count()
-        line_number = 0
+            # Read and parse text file in chunks
+            text_reader = StreamingTextReader(
+                input_path,
+                chunk_size=1000  # Lines per chunk
+            )
 
-        # Create progress bar
-        with tqdm(total=total_pages, desc="Processing pages", unit="page") as pbar:
-            for chunk_lines in pdf_reader.read_pages_chunked():
-                for line in chunk_lines:
-                    line_number += 1
-                    parser.parse_line(line, line_number)
+            total_chunks = text_reader.get_page_count()
+            line_number = 0
 
-                pbar.update(config['processing']['page_chunk_size'])
+            # Create progress bar
+            with tqdm(total=total_chunks, desc="Processing chunks", unit="chunk") as pbar:
+                for chunk_lines in text_reader.read_pages_chunked():
+                    for line in chunk_lines:
+                        line_number += 1
+                        parser.parse_line(line, line_number)
+
+                    pbar.update(1)
+
+        elif file_ext == '.pdf':
+            # Process PDF file
+            file_info = PDFInfo.get_info(input_path)
+            logger.info(f"Processing PDF: {file_info['filename']}")
+            logger.info(f"  Size: {file_info['size_mb']:.2f} MB")
+            logger.info(f"  Pages: {file_info.get('page_count', 'unknown')}")
+
+            # Initialize parser
+            parser = PairingParser(config)
+
+            # Read and parse PDF in chunks
+            pdf_reader = StreamingPDFReader(
+                input_path,
+                chunk_size=config['processing']['page_chunk_size']
+            )
+
+            total_pages = pdf_reader.get_page_count()
+            line_number = 0
+
+            # Create progress bar
+            with tqdm(total=total_pages, desc="Processing pages", unit="page") as pbar:
+                for chunk_lines in pdf_reader.read_pages_chunked():
+                    for line in chunk_lines:
+                        line_number += 1
+                        parser.parse_line(line, line_number)
+
+                    pbar.update(config['processing']['page_chunk_size'])
+
+        else:
+            logger.error(f"Unsupported file type: {file_ext}. Supported types: .pdf, .dat")
+            return False
 
         # Finalize parsing
         master_data = parser.finalize()
@@ -113,8 +150,8 @@ def process_single_file(
         # Add metadata
         processing_time = time.time() - start_time
         master_data.add_metadata(
-            source_file=pdf_info['filename'],
-            page_count=pdf_info.get('page_count', 0),
+            source_file=file_info['filename'],
+            page_count=file_info.get('page_count', file_info.get('line_count', 0)),
             processing_time=processing_time
         )
 

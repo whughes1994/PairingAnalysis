@@ -3,8 +3,8 @@ Main pairing parser implementation.
 """
 import re
 from typing import Dict, Any, Optional
-from parsers.base_parser import BaseParser
-from models import Leg, DutyPeriod, Pairing, BidPeriod, MasterData
+from .base_parser import BaseParser
+from ..models import Leg, DutyPeriod, Pairing, BidPeriod, MasterData
 
 
 class PairingParser(BaseParser):
@@ -207,104 +207,153 @@ class PairingParser(BaseParser):
         if report_time:
             self.current_duty_period.report_time = report_time
 
+    def is_leg_line(self, line: str) -> bool:
+        """
+        Detect if line contains leg data.
+
+        Handles both:
+        - Equipment-based legs: "78J 202 ORD OGG..." (starts with 2 digits + letter)
+        - DH/UX deadheads: "DH 3707..." or "UX 3707..." (starts with DH or UX)
+
+        Note: .DAT files have leading spaces, so we strip before checking
+        """
+        if len(line) < 2:
+            return False
+
+        # Strip leading whitespace for .DAT file compatibility
+        stripped = line.lstrip()
+
+        if len(stripped) < 2:
+            return False
+
+        # Check for equipment code format (2 digits + letter)
+        if len(stripped) >= 3 and stripped[0:2].isdigit() and stripped[2].isalpha():
+            return True
+
+        # Check for specific deadhead markers: DH or UX
+        if stripped.startswith('DH ') or stripped.startswith('UX '):
+            return True
+
+        return False
+
     def _parse_leg(self, line: str):
-        """Parse flight leg data."""
+        """Parse flight leg data.
+
+        Format: Equipment [DH] FlightNum Dept Arr DepTime ArrTime GroundTime MealCode(s) FlightTime AccumFlightTime AccumDutyTime
+
+        Examples:
+        - 73G 123 ORD LAX 0800 1030 2:15 B L 4:30 4:30 6:45
+        - 78J DH 456 LAX SFO 1245 1415 0 7:45 12:15 14:30
+        - 37K 789 SFO ORD 1415 2030 0 B D 4:15 16:30 18:45
+        """
         if not self.current_duty_period:
             self.current_duty_period = DutyPeriod()
 
         leg = Leg()
 
-        # Split line into fields for variable-width parsing
-        # Remove calendar dates (everything after the last digit before |)
+        # Remove calendar dates (everything after |)
         main_part = line.split('|')[0] if '|' in line else line
         fields = main_part.split()
 
         if len(fields) < 6:
             return
 
-        # Check for deadhead by flight number "DH"
-        if fields[1] == 'DH':
-            # Deadhead format with DH flight number: eqp DH fltnum dept arr dtime atime gtime d/c dt gtime
+        # Field index tracker
+        idx = 0
+
+        # Check if first field is a deadhead marker (UX, DH, etc.) without equipment code
+        # Deadhead markers are 2-letter uppercase codes
+        if len(fields[idx]) == 2 and fields[idx].isupper() and fields[idx].isalpha():
             leg.deadhead = True
-            leg.equipment = fields[0]
-            leg.flight_number = fields[2]  # Actual flight number after DH
-            leg.departure_station = fields[3]
-            leg.arrival_station = fields[4]
-            leg.departure_time = fields[5]
-            leg.arrival_time = fields[6]
-            if len(fields) >= 11:
-                leg.ground_time = self.convert_time(fields[7])
-                leg.d_c = self.convert_time(fields[8])
-                leg.duty_time = self.convert_time(fields[9])
-                leg.flight_time = self.convert_time(fields[10])
-                leg.accumulated_flight_time = leg.flight_time
-        # Check for deadhead by "D" marker in field[6]
-        elif len(fields) > 6 and fields[6] == 'D':
-            # Deadhead format with D marker: eqp flt dept arr dtime atime D svc ft accum_ft dt d/c
-            leg.deadhead = True
-            leg.equipment = fields[0]
-            leg.flight_number = fields[1]
-            leg.departure_station = fields[2]
-            leg.arrival_station = fields[3]
-            leg.departure_time = fields[4]
-            leg.arrival_time = fields[5]
-            if len(fields) >= 12:
-                leg.flight_time = self.convert_time(fields[8])
-                leg.accumulated_flight_time = self.convert_time(fields[9])
-                leg.duty_time = self.convert_time(fields[10])
-                leg.d_c = self.convert_time(fields[11])
+            leg.equipment = None  # No equipment code for UX deadheads
+            idx += 1
         else:
-            # Normal leg - detect format by checking field[8]
-            # Format 1 (787, with service): eqp flt dept arr dtime atime gtime meal svc ft accum_ft dt d/c (13 fields)
-            # Format 2 (737, no service):   eqp flt dept arr dtime atime gtime meal ft accum_ft dt ind d/c (12 fields)
-            leg.deadhead = False
-            leg.equipment = fields[0]
-            leg.flight_number = fields[1]
-            leg.departure_station = fields[2]
-            leg.arrival_station = fields[3]
-            leg.departure_time = fields[4]
-            leg.arrival_time = fields[5]
+            # Normal leg: equipment code comes first
+            leg.equipment = fields[idx]
+            idx += 1
 
-            if len(fields) >= 7:
-                leg.ground_time = self.convert_time(fields[6])
+            # Check for deadhead marker after equipment (e.g., "20S DH 1124...")
+            if idx < len(fields) and len(fields[idx]) == 2 and fields[idx].isupper() and fields[idx].isalpha():
+                leg.deadhead = True
+                idx += 1
+            else:
+                leg.deadhead = False
 
-            # Detect format: if field[8] looks like time (H:MM or H.MM), it's Format 2 (no service code)
-            has_service_code = False
-            if len(fields) >= 9:
-                field8 = fields[8]
-                # Service code is a single letter (S, B, D, etc), not a time
-                if len(field8) == 1 and field8.isalpha():
-                    has_service_code = True
+        # 3. Flight number
+        if idx < len(fields):
+            leg.flight_number = fields[idx]
+            idx += 1
 
-            if has_service_code and len(fields) >= 13:
-                # Format 1: 787 format with service code
-                # eqp flt dept arr dtime atime gtime meal svc ft accum_ft dt d/c
-                leg.meal_code = fields[7]
-                # field[8] is service code (S) - skip it
-                leg.flight_time = self.convert_time(fields[9])
-                leg.accumulated_flight_time = self.convert_time(fields[10])
-                leg.duty_time = self.convert_time(fields[11])
-                leg.d_c = self.convert_time(fields[12])
-            elif not has_service_code and len(fields) >= 9:
-                # Format 2: 737 format without service code
-                # Two variants:
-                # With meal: eqp flt dept arr dtime atime gtime meal ft accum_ft [calendar...]
-                # No meal:   eqp flt dept arr dtime atime gtime ft accum_ft d/c [calendar...]
+        # 4. Departure station
+        if idx < len(fields):
+            leg.departure_station = fields[idx]
+            idx += 1
 
-                # Check if field[7] is a meal code (single letter) or a time
-                field7 = fields[7]
-                if len(field7) == 1 and field7.isalpha():
-                    # Has meal code
-                    leg.meal_code = field7
-                    leg.flight_time = self.convert_time(fields[8])
-                    leg.accumulated_flight_time = self.convert_time(fields[9])
-                    # Rest is calendar dates
-                else:
-                    # No meal code - field[7] is FTM
-                    leg.flight_time = self.convert_time(field7)
-                    leg.accumulated_flight_time = self.convert_time(fields[8])
-                    if len(fields) >= 10:
-                        leg.d_c = self.convert_time(fields[9])
+        # 5. Arrival station
+        if idx < len(fields):
+            leg.arrival_station = fields[idx]
+            idx += 1
+
+        # 6. Departure time (HHMM format)
+        if idx < len(fields):
+            leg.departure_time = fields[idx]
+            idx += 1
+
+        # 7. Arrival time (HHMM format)
+        if idx < len(fields):
+            leg.arrival_time = fields[idx]
+            idx += 1
+
+        # 8. Ground time (H:MM or HH:MM or may be missing)
+        # Ground time is a time format (contains : or is numeric like "0")
+        if idx < len(fields):
+            field = fields[idx]
+            # Check if this looks like a time (contains : or is "0" or numeric)
+            if ':' in field or field == '0' or (field.replace('.', '').replace(':', '').isdigit()):
+                leg.ground_time = self.convert_time(field)
+                idx += 1
+            # Otherwise, no ground time present, this is meal code
+
+        # 9. Meal code(s) - 0 to 3 letters (B, L, D, S), space-separated
+        # Meal codes are single uppercase letters, collect all of them
+        meal_codes = []
+        while idx < len(fields):
+            field = fields[idx]
+            # Meal code is 1 letter A-Z
+            if len(field) == 1 and field.isalpha() and field.isupper():
+                meal_codes.append(field)
+                idx += 1
+            else:
+                break
+
+        if meal_codes:
+            leg.meal_code = ' '.join(meal_codes)
+
+        # 10. Flight time (H:MM or HH:MM)
+        if idx < len(fields):
+            leg.flight_time = self.convert_time(fields[idx])
+            idx += 1
+
+        # 11. Accumulated flight time (H:MM or HH:MM)
+        if idx < len(fields):
+            leg.accumulated_flight_time = self.convert_time(fields[idx])
+            idx += 1
+
+        # 12. Accumulated duty time (H:MM or HH:MM)
+        if idx < len(fields):
+            leg.duty_time = self.convert_time(fields[idx])
+            idx += 1
+
+        # 13. D/C (deadhead credit) - optional field, only present on some deadhead legs
+        if idx < len(fields):
+            field = fields[idx]
+            # Check if it's a time format (H:MM, HH:MM, or decimal like .00)
+            if ':' in field or '.' in field or field.replace('.', '').replace(':', '').isdigit():
+                leg.d_c = self.convert_time(field)
+                idx += 1
+
+        # Any remaining fields before calendar dates are ignored
+        # (calendar dates start after duty time)
 
         self.current_duty_period.legs.append(leg)
 
@@ -372,10 +421,45 @@ class PairingParser(BaseParser):
     def _finalize_pairing(self):
         """Finalize current pairing."""
         if self.current_pairing and self.current_bid_period:
+            # Set layover_station values based on business rules
+            self._set_layover_stations(self.current_pairing)
+
             self.current_bid_period.pairings.append(self.current_pairing)
             self.stats['pairings_parsed'] += 1
             self.logger.debug(f"Finalized pairing: {self.current_pairing.id}")
             self.current_pairing = None
+
+    def _set_layover_stations(self, pairing):
+        """Set layover_station values based on business rules.
+
+        Rules:
+        - 1-day trips: No layover stations (all None)
+        - Multi-day trips: Layover for intermediate days only, None for last day
+        """
+        if not pairing.duty_periods:
+            return
+
+        num_days = len(pairing.duty_periods)
+
+        # For 1-day trips, all layover_stations should be None
+        if num_days == 1 or pairing.days == "1":
+            for duty_period in pairing.duty_periods:
+                duty_period.layover_station = None
+            return
+
+        # For multi-day trips:
+        # - Set layover_station for intermediate duty periods (not the last one)
+        # - Last duty period gets None (returning to base)
+        for i, duty_period in enumerate(pairing.duty_periods):
+            if i == num_days - 1:
+                # Last duty period - no layover
+                duty_period.layover_station = None
+            else:
+                # Intermediate duty period - set to arrival station of last leg
+                if duty_period.legs and len(duty_period.legs) > 0:
+                    duty_period.layover_station = duty_period.legs[-1].arrival_station
+                else:
+                    duty_period.layover_station = None
 
     def _finalize_bid_period(self):
         """Finalize current bid period."""

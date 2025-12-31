@@ -24,6 +24,44 @@ except ImportError:
     print("Error: pymongo not installed. Run: pip install pymongo")
     sys.exit(1)
 
+try:
+    import toml
+except ImportError:
+    toml = None  # Optional dependency
+
+
+def get_connection_from_secrets() -> str:
+    """
+    Read MongoDB connection string from .streamlit/secrets.toml
+
+    Returns:
+        Connection string or None if not found
+    """
+    secrets_path = Path(".streamlit/secrets.toml")
+
+    if not secrets_path.exists():
+        return None
+
+    if toml is None:
+        print("Warning: toml package not installed. Cannot read secrets.toml")
+        print("Install with: pip install toml")
+        return None
+
+    try:
+        with open(secrets_path, 'r') as f:
+            secrets = toml.load(f)
+
+        # Try to get MONGO_URI from secrets
+        if 'MONGO_URI' in secrets:
+            return secrets['MONGO_URI']
+
+        # If not found, return None
+        return None
+
+    except Exception as e:
+        print(f"Warning: Could not read .streamlit/secrets.toml: {e}")
+        return None
+
 
 class MongoDBImporter:
     """Import pairing data into MongoDB."""
@@ -260,12 +298,14 @@ class MongoDBImporter:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Import pairing data to MongoDB")
+    parser = argparse.ArgumentParser(
+        description="Import pairing data to MongoDB",
+        epilog="If --connection is not provided, will try to read from .streamlit/secrets.toml"
+    )
     parser.add_argument('--file', type=str, help="JSON file to import")
     parser.add_argument('--dir', type=str, help="Directory of JSON files to import")
     parser.add_argument('--connection', type=str,
-                       default="mongodb://localhost:27017/",
-                       help="MongoDB connection string")
+                       help="MongoDB connection string (or use .streamlit/secrets.toml)")
     parser.add_argument('--clear', action='store_true',
                        help="Clear existing data before import")
     parser.add_argument('--skip-indexes', action='store_true',
@@ -278,9 +318,24 @@ def main():
         print("\nError: Must specify --file or --dir")
         sys.exit(1)
 
+    # Determine connection string
+    connection_string = args.connection
+
+    if not connection_string:
+        # Try to read from secrets.toml
+        print("No --connection provided, checking .streamlit/secrets.toml...")
+        connection_string = get_connection_from_secrets()
+
+        if connection_string:
+            print("✓ Using connection string from .streamlit/secrets.toml")
+        else:
+            print("✗ No connection string found in .streamlit/secrets.toml")
+            print("Using default: mongodb://localhost:27017/")
+            connection_string = "mongodb://localhost:27017/"
+
     # Initialize importer
     print("Connecting to MongoDB...")
-    importer = MongoDBImporter(args.connection)
+    importer = MongoDBImporter(connection_string)
 
     if not importer.test_connection():
         sys.exit(1)

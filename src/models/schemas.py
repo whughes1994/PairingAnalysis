@@ -126,6 +126,7 @@ class DutyPeriod(BaseModel):
     hotel: Optional[str] = None
     hotel_phone: Optional[str] = None
     ground_transport: Optional[str] = None
+    layover_station: Optional[str] = None  # Set by Pairing.model_post_init()
 
     @computed_field
     @property
@@ -168,14 +169,6 @@ class DutyPeriod(BaseModel):
             return hours * 60 + minutes
         except ValueError:
             return None
-
-    @computed_field
-    @property
-    def layover_station(self) -> Optional[str]:
-        """Get the layover station (last leg's arrival station)."""
-        if self.legs and len(self.legs) > 0:
-            return self.legs[-1].arrival_station
-        return None
 
     @computed_field
     @property

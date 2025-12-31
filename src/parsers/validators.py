@@ -3,7 +3,7 @@ Data validation utilities.
 """
 from typing import List, Dict, Any
 import logging
-from models import Pairing, DutyPeriod, BidPeriod
+from ..models import Pairing, DutyPeriod, BidPeriod
 
 
 class PairingValidator:
