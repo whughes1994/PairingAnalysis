@@ -1,32 +1,29 @@
-# PDF Processing
-pdfplumber>=0.11.0
-pypdfium2>=5.0.0
-
-# Data handling
-pydantic>=2.0.0
-
-# CLI
-click>=8.0.0
-tqdm>=4.65.0
-
-# Configuration
-pyyaml>=6.0
-
-# Logging
-colorlog>=6.7.0
-
-# Testing (optional)
-pytest>=7.4.0
-pytest-cov>=4.1.0
-
-# MongoDB (optional - for analytics)
-pymongo>=4.6.0
-
-# Dashboard (optional - for web interface)
+# Streamlit
 streamlit>=1.28.0
-plotly>=5.18.0
+
+# Database
+pymongo>=4.5.0
+
+# Data processing
 pandas>=2.0.0
 
-# Geolocation (optional - for map visualizations)
-airportsdata>=20231215
-geopy>=2.4.0
+# Visualization
+plotly>=5.18.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Airport data
+airportsdata>=20231201
+
+# SSL/TLS support
+certifi>=2023.11.17
+
+# Configuration
+toml>=0.10.2
+
+# Progress bars (for imports)
+tqdm>=4.66.0
+
+# PDF parsing (for parser, optional for dashboard)
+pdfplumber>=0.10.0

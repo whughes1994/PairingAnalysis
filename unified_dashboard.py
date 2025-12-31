@@ -39,15 +39,45 @@ def get_mongodb_connection():
         import certifi
 
         mongo_uri = st.secrets["MONGO_URI"]
+
+        # Connection options optimized for Streamlit Cloud
         client = MongoClient(
             mongo_uri,
-            serverSelectionTimeoutMS=5000,
-            tlsCAFile=certifi.where()  # Use certifi's CA certificates
+            serverSelectionTimeoutMS=10000,  # Increased timeout for cloud
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
+            tlsCAFile=certifi.where(),  # Use certifi's CA certificates
+            retryWrites=True,
+            w='majority'
         )
+
+        # Test connection
         client.admin.command('ping')
+        st.success("✓ MongoDB connected successfully")
         return client['airline_pairings']
+
+    except KeyError:
+        st.error("❌ MONGO_URI not found in secrets. Please add it in Streamlit Cloud settings.")
+        st.info("""
+        **How to add secrets in Streamlit Cloud:**
+        1. Go to your app settings
+        2. Click on "Secrets" in the left sidebar
+        3. Add your MongoDB connection string in TOML format:
+        ```
+        MONGO_URI = "mongodb+srv://username:password@cluster.mongodb.net/"
+        ```
+        """)
+        return None
+
     except Exception as e:
-        st.error(f"MongoDB connection failed: {e}")
+        st.error(f"❌ MongoDB connection failed: {e}")
+        st.info("""
+        **Troubleshooting tips:**
+        - Ensure your MongoDB Atlas cluster allows connections from all IPs (0.0.0.0/0)
+        - Verify your username and password are correct
+        - Check that your database user has proper permissions
+        - Make sure the connection string is in the correct format
+        """)
         return None
 
 db = get_mongodb_connection()
@@ -694,32 +724,15 @@ if st.session_state.nav_page == 'explorer':
             )
         )
 
-        # Calculate bounds for auto-zoom with padding
-        lat_min, lat_max = layover_stats['lat'].min(), layover_stats['lat'].max()
-        lon_min, lon_max = layover_stats['lon'].min(), layover_stats['lon'].max()
-
-        # Add padding (10% of range)
-        lat_range = lat_max - lat_min
-        lon_range = lon_max - lon_min
-        lat_padding = lat_range * 0.1 if lat_range > 0 else 5
-        lon_padding = lon_range * 0.1 if lon_range > 0 else 5
-
+        # Configure map to auto-zoom to data without cropping viewport
         fig_layover_map.update_geos(
             showcountries=True,
             showcoastlines=True,
             showland=True,
             landcolor='rgb(243, 243, 243)',
             coastlinecolor='rgb(204, 204, 204)',
-            # Auto-fit to data bounds
-            fitbounds="locations",
-            # Set center based on data
-            center=dict(
-                lat=(lat_min + lat_max) / 2,
-                lon=(lon_min + lon_max) / 2
-            ),
-            # Visible bounds with padding
-            lataxis=dict(range=[lat_min - lat_padding, lat_max + lat_padding]),
-            lonaxis=dict(range=[lon_min - lon_padding, lon_max + lon_padding])
+            # Auto-fit to data bounds (keeps full map viewport, just zooms in)
+            fitbounds="locations"
         )
 
         fig_layover_map.update_layout(
@@ -903,56 +916,17 @@ if st.session_state.nav_page == 'explorer':
                             )
                         )
 
-                    # Calculate bounds for auto-zoom
-                    if all_stations:
-                        all_lats = [s['lat'] for s in all_stations if s['lat']]
-                        all_lons = [s['lon'] for s in all_stations if s['lon']]
-
-                        if all_lats and all_lons:
-                            lat_min, lat_max = min(all_lats), max(all_lats)
-                            lon_min, lon_max = min(all_lons), max(all_lons)
-
-                            # Add padding (15% of range for tighter zoom on route)
-                            lat_range = lat_max - lat_min
-                            lon_range = lon_max - lon_min
-                            lat_padding = lat_range * 0.15 if lat_range > 0 else 5
-                            lon_padding = lon_range * 0.15 if lon_range > 0 else 5
-
-                            fig_pairing.update_geos(
-                                projection_type='natural earth',
-                                showcountries=True,
-                                showcoastlines=True,
-                                showland=True,
-                                landcolor='rgb(243, 243, 243)',
-                                coastlinecolor='rgb(204, 204, 204)',
-                                # Auto-fit to route
-                                center=dict(
-                                    lat=(lat_min + lat_max) / 2,
-                                    lon=(lon_min + lon_max) / 2
-                                ),
-                                lataxis=dict(range=[lat_min - lat_padding, lat_max + lat_padding]),
-                                lonaxis=dict(range=[lon_min - lon_padding, lon_max + lon_padding])
-                            )
-                        else:
-                            # Fallback if no valid coordinates
-                            fig_pairing.update_geos(
-                                projection_type='natural earth',
-                                showcountries=True,
-                                showcoastlines=True,
-                                showland=True,
-                                landcolor='rgb(243, 243, 243)',
-                                coastlinecolor='rgb(204, 204, 204)',
-                            )
-                    else:
-                        # Fallback if no stations
-                        fig_pairing.update_geos(
-                            projection_type='natural earth',
-                            showcountries=True,
-                            showcoastlines=True,
-                            showland=True,
-                            landcolor='rgb(243, 243, 243)',
-                            coastlinecolor='rgb(204, 204, 204)',
-                        )
+                    # Configure map to auto-zoom to route without cropping viewport
+                    fig_pairing.update_geos(
+                        projection_type='natural earth',
+                        showcountries=True,
+                        showcoastlines=True,
+                        showland=True,
+                        landcolor='rgb(243, 243, 243)',
+                        coastlinecolor='rgb(204, 204, 204)',
+                        # Auto-fit to route (keeps full map viewport, just zooms in)
+                        fitbounds="locations"
+                    )
 
                     fig_pairing.update_layout(
                         title=f'Route Map for Pairing {pairing_id}',
