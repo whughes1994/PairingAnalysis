@@ -68,7 +68,13 @@ class MongoDBImporter:
 
     def __init__(self, connection_string: str = "mongodb://localhost:27017/"):
         """Initialize MongoDB connection."""
-        self.client = MongoClient(connection_string)
+        try:
+            import certifi
+            self.client = MongoClient(connection_string, tlsCAFile=certifi.where())
+        except ImportError:
+            # Fallback if certifi not available
+            self.client = MongoClient(connection_string)
+
         self.db = self.client['airline_pairings']
 
         # Collections

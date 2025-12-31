@@ -36,8 +36,14 @@ st.set_page_config(
 def get_mongodb_connection():
     """Connect to MongoDB using credentials from secrets."""
     try:
+        import certifi
+
         mongo_uri = st.secrets["MONGO_URI"]
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=5000,
+            tlsCAFile=certifi.where()  # Use certifi's CA certificates
+        )
         client.admin.command('ping')
         return client['airline_pairings']
     except Exception as e:
