@@ -13,10 +13,15 @@ build/
 
 # Streamlit
 .streamlit/secrets.toml
+.streamlit/*.toml
 
 # Output files
 output/*.json
 output/*.pdf
+output/*.backup_*.json
+
+# Archive (old/obsolete files)
+archive/
 
 # Logs
 *.log

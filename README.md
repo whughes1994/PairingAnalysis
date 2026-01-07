@@ -55,66 +55,65 @@ MONGO_URI = "mongodb+srv://username:password@cluster.mongodb.net/"
 
 ### 3. Parse Pairing Data
 
+**Option A: Batch Process Entire Folder (Recommended)**
+
 ```bash
-# Parse PDF to JSON
-python3 main.py --input pairing.pdf --output output/ORD.json
+# Process all .DAT and .PDF files in a folder and import to MongoDB
+python3 batch_process.py --folder "Pairing Source Docs/February 2026"
+
+# Parse only (no import)
+python3 batch_process.py --folder "Pairing Source Docs/February 2026" --no-import
+
+# Process recursively through subdirectories
+python3 batch_process.py --folder "Pairing Source Docs" --recursive
+```
+
+**Option B: Process Single File**
+
+```bash
+# Parse .DAT or .PDF file to JSON
+python3 -m src.main -i "pairing.DAT" -o "output/ORD.json"
 
 # Import to MongoDB
-python3 mongodb_import.py \
-  --connection "YOUR_MONGO_URI" \
-  --file output/ORD.json \
-  --clear
+python3 mongodb_import.py --file output/ORD.json
 ```
 
-### 4. Fix Layover Stations
+### 4. Launch Dashboard
 
 ```bash
-python3 fix_layover_stations_v3.py "YOUR_MONGO_URI"
-```
-
-### 5. Launch Dashboard
-
-```bash
-# Option 1: Unified Dashboard (Recommended - includes QA tools)
+# Launch unified dashboard
 python3 -m streamlit run unified_dashboard.py
-
-# Option 2: Original Dashboard
-python3 -m streamlit run dashboard_with_maps.py
-
-# Option 3: Use launcher menu
-./launch.sh
 ```
 
 Opens at: http://localhost:8501
 
-**New Unified Dashboard** combines:
-- ✈️ Pairing Explorer (maps, filters, route visualization)
-- 🔍 QA Workbench (PDF vs JSON comparison)
-- All in one tabbed interface!
+**Unified Dashboard Features**:
+- ✈️ Interactive layover and route maps
+- 🔍 Advanced filtering (fleet, base, layovers, credit hours)
+- 📊 Analytics and statistics
+- 🗺️ Individual pairing route visualization
 
 ## Project Structure
 
 ```
 .
-├── unified_dashboard.py         # ⭐ Unified dashboard (Pairing Explorer + QA)
-├── dashboard_with_maps.py       # Original dashboard with interactive maps
-├── qa_workbench.py              # Standalone QA workbench
-├── qa_annotations.py            # QA annotations and issue tracking
-├── validate_parsing.py          # Automated validation script
-├── quick_compare.py             # Fast CLI comparison tool
-├── main.py                      # PDF parser CLI
+├── unified_dashboard.py         # ⭐ Main dashboard with maps and filters
+├── batch_process.py             # Batch folder processing script
 ├── mongodb_import.py            # MongoDB import utility
-├── fix_layover_stations_v3.py  # Layover data correction script
-├── launch.sh                    # Dashboard launcher menu
-├── stop_streamlit.sh            # Helper to stop running dashboards
+├── cleanup_project.sh           # Project cleanup script
 ├── requirements.txt             # Python dependencies
-├── QA_GUIDE.md                  # Quality assurance documentation
-├── QA_QUICK_REFERENCE.md        # QA tools cheat sheet
 ├── src/
-│   └── parsers/
-│       └── pairing_parser.py   # PDF parsing logic
-├── output/                      # Parsed JSON files
-├── qa_annotations/              # QA issue tracking data
+│   ├── main.py                 # Parser entry point
+│   ├── parsers/
+│   │   └── pairing_parser.py  # Parsing logic
+│   └── utils/
+│       ├── pdf_reader.py      # PDF file reading
+│       ├── text_reader.py     # .DAT file reading
+│       └── file_utils.py      # JSON writing utilities
+├── output/                      # Parsed JSON files (gitignored)
+├── archive/                     # Old/obsolete files (gitignored)
+│   ├── old_docs/               # Archived markdown files
+│   └── old_scripts/            # Archived Python scripts
 └── .streamlit/
     ├── config.toml             # Dashboard theme
     └── secrets.toml            # MongoDB credentials (gitignored)
@@ -133,55 +132,45 @@ Opens at: http://localhost:8501
 - Layover station (null for last duty period and 1-day trips)
 - Origin station, flight time, ground time
 
-## Quality Assurance
+## Batch Processing
 
-### Validation Framework
-
-Automated validation to ensure parsing accuracy:
+Process entire folders of pairing files at once:
 
 ```bash
-python3 validate_parsing.py "Pairing Source Docs/ORDDSL.pdf" output/ORD.json
+# Process all files in February 2026 folder and import to MongoDB
+python3 batch_process.py --folder "Pairing Source Docs/February 2026"
+
+# Options:
+#   --folder PATH      Folder containing .DAT or .PDF files (required)
+#   --output PATH      Output directory for JSON files (default: output/)
+#   --recursive        Search recursively through subdirectories
+#   --no-import        Parse only, don't import to MongoDB
 ```
 
-Validates:
-- Header information (base, month)
-- Bid period count
-- Fleet assignments
-- FTM/TTL totals matching
-- Pairing structure completeness
-- Time format consistency
-- Station code validity
-- Data completeness metrics
+**Example Output:**
+```
+Found 12 file(s) to process:
+  - February 2026/ORDDSL.DAT
+  - February 2026/LAXDSL.DAT
+  ...
 
-### QA Workbench
+✓ Successfully parsed ORDDSL.DAT
+✓ Successfully imported ORDDSL.json
 
-Interactive tool for human-in-the-loop quality assurance:
-
-```bash
-streamlit run qa_workbench.py
+BATCH PROCESSING COMPLETE
+Total files:           12
+Successfully parsed:   12
+Parse failures:        0
+Successfully imported: 12
+Import failures:       0
 ```
 
-Features:
-- Side-by-side PDF vs parsed data comparison
-- Fleet totals validation
-- Individual pairing inspection
-- Search & compare across both sources
-- Automated validation report
+## Supported File Formats
 
-### QA Annotations
+- **`.DAT` files**: Plain text format (50-100x faster than PDF)
+- **`.PDF` files**: PDF format (requires pdfplumber)
 
-Issue tracking and annotation tool for QA reviewers:
-
-```bash
-streamlit run qa_annotations.py
-```
-
-Capabilities:
-- Document parsing issues with severity levels
-- Track expected vs actual values
-- Status tracking (Open, In Progress, Resolved)
-- Export annotation reports (CSV, JSON)
-- Issue statistics and analytics
+Both formats produce identical JSON output and are automatically detected by file extension.
 
 ## License
 

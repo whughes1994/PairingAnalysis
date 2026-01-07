@@ -434,7 +434,7 @@ if 'nav_page' not in st.session_state:
     st.session_state.nav_page = 'explorer'
 
 # Horizontal navigation menu using columns
-nav_col1, nav_col2, nav_col3 = st.columns(3)
+nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
 
 with nav_col1:
     if st.button("📊 Pairing Explorer",
@@ -460,6 +460,14 @@ with nav_col3:
         st.session_state.nav_page = 'annotations'
         st.rerun()
 
+with nav_col4:
+    if st.button("📈 Analytics",
+                 use_container_width=True,
+                 type="primary" if st.session_state.nav_page == 'analytics' else "secondary",
+                 key="nav_analytics"):
+        st.session_state.nav_page = 'analytics'
+        st.rerun()
+
 st.markdown("---")
 
 # ============================================================================
@@ -473,7 +481,8 @@ with st.sidebar:
     page_options = {
         "📊 Pairing Explorer": "explorer",
         "🔍 QA Workbench": "qa",
-        "📝 Annotations": "annotations"
+        "📝 Annotations": "annotations",
+        "📈 Analytics": "analytics"
     }
 
     # Find current page display name
@@ -1308,3 +1317,432 @@ elif st.session_state.nav_page == 'annotations':
     ./launch.sh
     ```
     """)
+
+# ============================================================================
+# PAGE 4: ANALYTICS DASHBOARD
+# ============================================================================
+
+elif st.session_state.nav_page == 'analytics':
+    st.header("📈 Pairing Analytics")
+    st.markdown("Comprehensive statistical analysis and insights from pairing data")
+
+    if not db:
+        st.error("Database connection required for analytics")
+        st.stop()
+
+    # Get bid month filter from sidebar (reuse existing filter logic)
+    selected_bid_month = st.session_state.get('selected_bid_month')
+    selected_fleet = st.session_state.get('selected_fleet')
+    selected_base = st.session_state.get('selected_base')
+
+    # Build query based on filters
+    query = {}
+    if selected_bid_month:
+        bid_period_ids = [bp['_id'] for bp in db.bid_periods.find({'bid_month_year': selected_bid_month}, {'_id': 1})]
+        if bid_period_ids:
+            query['bid_period_id'] = {'$in': bid_period_ids}
+
+    if selected_fleet and selected_fleet != 'All':
+        query['fleet'] = selected_fleet
+
+    if selected_base and selected_base != 'All':
+        query['base'] = selected_base
+
+    # ========================================================================
+    # LOAD ALL PAIRINGS FOR ANALYTICS
+    # ========================================================================
+
+    @st.cache_data(ttl=300)
+    def load_analytics_data(_db, _query):
+        """Load all pairing data for analytics."""
+        pairings = list(_db.pairings.find(
+            _query,
+            {
+                'id': 1, 'fleet': 1, 'base': 1, 'pairing_category': 1,
+                'credit_minutes': 1, 'days': 1, 'flight_time_minutes': 1,
+                'tafb_minutes': 1, 'duty_periods': 1, 'bid_period_id': 1
+            }
+        ))
+        return pairings
+
+    with st.spinner("Loading pairing data..."):
+        pairings = load_analytics_data(db, query)
+
+    if not pairings:
+        st.warning("No pairings found for the selected filters")
+        st.stop()
+
+    st.success(f"Loaded {len(pairings):,} pairings for analysis")
+
+    # ========================================================================
+    # DASHBOARD LAYOUT
+    # ========================================================================
+
+    # Create tabs for different analytics sections
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Trip Distribution",
+        "⚡ Efficiency",
+        "✈️ Flying Metrics",
+        "📈 Credit Analysis"
+    ])
+
+    # ========================================================================
+    # TAB 1: TRIP DISTRIBUTION
+    # ========================================================================
+
+    with tab1:
+        st.subheader("Trip Length Distribution")
+
+        # Calculate trip length distribution
+        from collections import Counter
+        trip_lengths = [p['days'] for p in pairings]
+        length_counts = Counter(trip_lengths)
+        total = len(pairings)
+
+        # Create dataframe for visualization
+        dist_data = []
+        for days in sorted(length_counts.keys()):
+            count = length_counts[days]
+            percentage = (count / total) * 100
+            dist_data.append({
+                'Trip Length': f'{days}-Day',
+                'Count': count,
+                'Percentage': percentage
+            })
+
+        dist_df = pd.DataFrame(dist_data)
+
+        # Display metrics in columns
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric("Total Pairings", f"{total:,}")
+
+        with col2:
+            avg_days = sum(trip_lengths) / len(trip_lengths)
+            st.metric("Average Trip Length", f"{avg_days:.1f} days")
+
+        with col3:
+            most_common_days = length_counts.most_common(1)[0][0]
+            st.metric("Most Common", f"{most_common_days}-Day Trips")
+
+        # Create two visualizations side by side
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            # Pie chart
+            fig_pie = px.pie(
+                dist_df,
+                values='Count',
+                names='Trip Length',
+                title='Trip Distribution (Pie Chart)',
+                hole=0.3
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with chart_col2:
+            # Bar chart
+            fig_bar = px.bar(
+                dist_df,
+                x='Trip Length',
+                y='Percentage',
+                title='Trip Distribution (Bar Chart)',
+                text='Percentage',
+                color='Percentage',
+                color_continuous_scale='Blues'
+            )
+            fig_bar.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            fig_bar.update_layout(yaxis_title='Percentage (%)', showlegend=False)
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # Detailed breakdown table
+        st.markdown("### Detailed Breakdown")
+        dist_df['Percentage'] = dist_df['Percentage'].apply(lambda x: f"{x:.1f}%")
+        st.dataframe(dist_df, hide_index=True, use_container_width=True)
+
+    # ========================================================================
+    # TAB 2: EFFICIENCY METRICS
+    # ========================================================================
+
+    with tab2:
+        st.subheader("Trip Efficiency Analysis")
+        st.markdown("**Efficiency Score** = Credit Hours ÷ Time Away From Base (TAFB)")
+
+        # Calculate efficiency scores (exclude 1-day trips with TAFB=0)
+        efficiencies = []
+        for p in pairings:
+            tafb = p.get('tafb_minutes', 0)
+            credit = p.get('credit_minutes', 0)
+
+            if tafb > 0 and credit > 0:
+                efficiency = credit / tafb
+                efficiencies.append({
+                    'id': p['id'],
+                    'days': p['days'],
+                    'credit': credit / 60,  # Convert to hours
+                    'tafb': tafb / 60,
+                    'efficiency': efficiency,
+                    'fleet': p.get('fleet', 'Unknown')
+                })
+
+        if efficiencies:
+            eff_df = pd.DataFrame(efficiencies)
+            avg_eff = eff_df['efficiency'].mean()
+
+            # Gauge chart for overall efficiency
+            col1, col2, col3 = st.columns([2, 1, 1])
+
+            with col1:
+                # Create gauge chart
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number+delta",
+                    value=avg_eff,
+                    domain={'x': [0, 1], 'y': [0, 1]},
+                    title={'text': "Average Efficiency Score"},
+                    delta={'reference': 0.4},  # Typical baseline
+                    gauge={
+                        'axis': {'range': [None, 1.0]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, 0.3], 'color': "lightcoral"},
+                            {'range': [0.3, 0.5], 'color': "lightyellow"},
+                            {'range': [0.5, 1.0], 'color': "lightgreen"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 0.5
+                        }
+                    }
+                ))
+                fig_gauge.update_layout(height=300)
+                st.plotly_chart(fig_gauge, use_container_width=True)
+
+            with col2:
+                st.metric("Min Efficiency", f"{eff_df['efficiency'].min():.3f}")
+                st.metric("Median Efficiency", f"{eff_df['efficiency'].median():.3f}")
+
+            with col3:
+                st.metric("Max Efficiency", f"{eff_df['efficiency'].max():.3f}")
+                st.metric("Std Dev", f"{eff_df['efficiency'].std():.3f}")
+
+            # Efficiency by trip length
+            st.markdown("### Efficiency by Trip Length")
+
+            eff_by_days = eff_df.groupby('days')['efficiency'].agg(['mean', 'count']).reset_index()
+            eff_by_days.columns = ['Days', 'Average Efficiency', 'Count']
+            eff_by_days['Days'] = eff_by_days['Days'].apply(lambda x: f'{x}-Day')
+
+            fig_eff_bar = px.bar(
+                eff_by_days,
+                x='Days',
+                y='Average Efficiency',
+                title='Average Efficiency by Trip Length',
+                text='Average Efficiency',
+                color='Average Efficiency',
+                color_continuous_scale='RdYlGn'
+            )
+            fig_eff_bar.update_traces(texttemplate='%{text:.3f}', textposition='outside')
+            fig_eff_bar.update_layout(showlegend=False)
+            st.plotly_chart(fig_eff_bar, use_container_width=True)
+
+            # Top 20 most efficient pairings
+            st.markdown("### Top 20 Most Efficient Pairings")
+            top_eff = eff_df.nlargest(20, 'efficiency')[['id', 'fleet', 'days', 'credit', 'tafb', 'efficiency']]
+            top_eff['credit'] = top_eff['credit'].apply(lambda x: f"{x:.1f}h")
+            top_eff['tafb'] = top_eff['tafb'].apply(lambda x: f"{x:.1f}h")
+            top_eff['efficiency'] = top_eff['efficiency'].apply(lambda x: f"{x:.3f}")
+            top_eff.columns = ['Pairing ID', 'Fleet', 'Days', 'Credit', 'TAFB', 'Efficiency']
+            st.dataframe(top_eff, hide_index=True, use_container_width=True)
+
+        else:
+            st.warning("No multi-day trips found for efficiency analysis (1-day trips excluded)")
+
+    # ========================================================================
+    # TAB 3: FLYING METRICS
+    # ========================================================================
+
+    with tab3:
+        st.subheader("Flying Intensity Metrics")
+
+        # Calculate leg statistics
+        total_legs = 0
+        total_duty_days = 0
+        leg_durations = []
+        ground_times = []
+
+        for p in pairings:
+            for dp in p.get('duty_periods', []):
+                total_duty_days += 1
+                legs = dp.get('legs', [])
+                total_legs += len(legs)
+
+                for leg in legs:
+                    ft = leg.get('flight_time_minutes', 0)
+                    if isinstance(ft, (int, float)) and ft > 0:
+                        leg_durations.append(ft / 60)
+
+                    gt = leg.get('ground_time_minutes', 0)
+                    if isinstance(gt, (int, float)) and gt > 0:
+                        ground_times.append(gt / 60)
+
+        # Display key metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Total Legs", f"{total_legs:,}")
+
+        with col2:
+            st.metric("Total Duty Days", f"{total_duty_days:,}")
+
+        with col3:
+            if total_duty_days > 0:
+                avg_legs_per_day = total_legs / total_duty_days
+                st.metric("Avg Legs/Duty Day", f"{avg_legs_per_day:.2f}")
+            else:
+                st.metric("Avg Legs/Duty Day", "N/A")
+
+        with col4:
+            if leg_durations:
+                avg_leg_duration = sum(leg_durations) / len(leg_durations)
+                st.metric("Avg Leg Duration", f"{avg_leg_duration:.2f}h")
+            else:
+                st.metric("Avg Leg Duration", "N/A")
+
+        # Leg duration distribution
+        if leg_durations:
+            st.markdown("### Leg Duration Distribution")
+
+            fig_hist = px.histogram(
+                leg_durations,
+                nbins=30,
+                title='Distribution of Leg Durations',
+                labels={'value': 'Duration (hours)', 'count': 'Number of Legs'},
+                color_discrete_sequence=['steelblue']
+            )
+            fig_hist.update_layout(showlegend=False, xaxis_title='Duration (hours)', yaxis_title='Number of Legs')
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+            # Statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Shortest Leg", f"{min(leg_durations):.2f}h")
+            with col2:
+                st.metric("Median Leg", f"{sorted(leg_durations)[len(leg_durations)//2]:.2f}h")
+            with col3:
+                st.metric("Longest Leg", f"{max(leg_durations):.2f}h")
+
+        # Ground time analysis
+        if ground_times:
+            st.markdown("### Ground Time Analysis")
+
+            fig_ground = px.histogram(
+                ground_times,
+                nbins=30,
+                title='Distribution of Ground Times (Sit Time Between Legs)',
+                labels={'value': 'Duration (hours)', 'count': 'Number of Ground Times'},
+                color_discrete_sequence=['coral']
+            )
+            fig_ground.update_layout(showlegend=False, xaxis_title='Duration (hours)', yaxis_title='Count')
+            st.plotly_chart(fig_ground, use_container_width=True)
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                avg_ground = sum(ground_times) / len(ground_times)
+                st.metric("Avg Ground Time", f"{avg_ground:.2f}h")
+            with col2:
+                quick_turns = sum(1 for gt in ground_times if gt < 0.75)  # Less than 45 min
+                st.metric("Quick Turns (<45min)", f"{quick_turns}")
+            with col3:
+                long_sits = sum(1 for gt in ground_times if gt > 1.5)  # More than 90 min
+                st.metric("Long Sits (>90min)", f"{long_sits}")
+
+    # ========================================================================
+    # TAB 4: CREDIT ANALYSIS
+    # ========================================================================
+
+    with tab4:
+        st.subheader("Credit Hours Analysis")
+
+        # Extract credit hours
+        credit_hours = [p.get('credit_minutes', 0) / 60 for p in pairings if p.get('credit_minutes', 0) > 0]
+
+        if credit_hours:
+            # Summary statistics
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Mean Credit", f"{sum(credit_hours)/len(credit_hours):.1f}h")
+
+            with col2:
+                sorted_credits = sorted(credit_hours)
+                median_credit = sorted_credits[len(sorted_credits)//2]
+                st.metric("Median Credit", f"{median_credit:.1f}h")
+
+            with col3:
+                st.metric("Min Credit", f"{min(credit_hours):.1f}h")
+
+            with col4:
+                st.metric("Max Credit", f"{max(credit_hours):.1f}h")
+
+            # Credit distribution histogram
+            st.markdown("### Credit Distribution")
+
+            fig_credit_hist = px.histogram(
+                credit_hours,
+                nbins=40,
+                title='Distribution of Credit Hours',
+                labels={'value': 'Credit Hours', 'count': 'Number of Pairings'},
+                color_discrete_sequence=['darkgreen']
+            )
+            fig_credit_hist.update_layout(
+                showlegend=False,
+                xaxis_title='Credit Hours',
+                yaxis_title='Number of Pairings'
+            )
+            st.plotly_chart(fig_credit_hist, use_container_width=True)
+
+            # Credit by trip length
+            st.markdown("### Credit by Trip Length")
+
+            credit_by_days = []
+            for p in pairings:
+                if p.get('credit_minutes', 0) > 0:
+                    credit_by_days.append({
+                        'days': p['days'],
+                        'credit': p['credit_minutes'] / 60
+                    })
+
+            if credit_by_days:
+                credit_df = pd.DataFrame(credit_by_days)
+
+                fig_scatter = px.scatter(
+                    credit_df,
+                    x='days',
+                    y='credit',
+                    title='Credit Hours vs Trip Length',
+                    labels={'days': 'Trip Length (Days)', 'credit': 'Credit Hours'},
+                    opacity=0.6,
+                    trendline='ols'
+                )
+                fig_scatter.update_traces(marker=dict(size=8, color='steelblue'))
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+                # Average credit by trip length
+                avg_credit_by_days = credit_df.groupby('days')['credit'].mean().reset_index()
+                avg_credit_by_days.columns = ['Days', 'Average Credit']
+                avg_credit_by_days['Days'] = avg_credit_by_days['Days'].apply(lambda x: f'{x}-Day')
+
+                fig_avg = px.bar(
+                    avg_credit_by_days,
+                    x='Days',
+                    y='Average Credit',
+                    title='Average Credit by Trip Length',
+                    text='Average Credit',
+                    color='Average Credit',
+                    color_continuous_scale='Greens'
+                )
+                fig_avg.update_traces(texttemplate='%{text:.1f}h', textposition='outside')
+                fig_avg.update_layout(showlegend=False, yaxis_title='Average Credit (hours)')
+                st.plotly_chart(fig_avg, use_container_width=True)
